@@ -1,0 +1,20 @@
+# secrets
+.env
+*.env
+!.env.example
+
+# python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# go
+services/gateway/gateway
+
+# os
+.DS_Store
+EOF
+
+# files 
+learnings/
