@@ -48,23 +48,37 @@ def is_valid_job(job:dict)->bool:
 def main() -> None:
     client = redis.Redis.from_url(REDIS_URL)
     log.info("bridge started; watching Redis list %r", QUEUE_NAME)
- 
+
     while True:
-        # BLPOP blocks until an item is available, so this loop is not a busy-wait.
-        _key, raw = client.blpop(QUEUE_NAME)
+        # BLPOP blocks server-side until an item is available. The redis-py
+        # client also has its own socket read timeout, which fires and raises
+        # if the wait is long enough -- that is a client-library quirk, not a
+        # real failure, so we catch it here and just loop back to waiting.
+        try:
+            item = client.blpop(QUEUE_NAME, timeout=30)
+        except redis.exceptions.TimeoutError:
+            continue
+        except redis.exceptions.ConnectionError:
+            log.warning("redis connection dropped, retrying...")
+            continue
+
+        if item is None:
+            # blpop's own timeout elapsed with nothing arriving -- normal, keep waiting.
+            continue
+
+        _key, raw = item
         try:
             job = json.loads(raw)
         except json.JSONDecodeError:
             log.warning("dropping job: not valid JSON: %r", raw[:200])
             continue
- 
+
         if not isinstance(job, dict) or not is_valid_job(job):
             continue
- 
+
         # Hand off to Celery. The bridge does no ingestion work itself.
         ingest_document.delay(job)
         log.info("dispatched job %s (%s)", job["job_id"], job["original_filename"])
- 
- 
+        
 if __name__ == "__main__":
     main()

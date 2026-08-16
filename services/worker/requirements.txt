@@ -1,4 +1,9 @@
 celery
 redis
 sentence-transformers
-unstructured
+pymupdf
+python-docx
+beautifulsoup4
+pandas
+# embedding library (OPenAI text-embedding-3)
+# pytesseract + tesseract binary

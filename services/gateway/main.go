@@ -38,19 +38,35 @@ type config struct {
 	maxBytes  int64
 }
 
-// allowedExtensions maps the file extensions we accept in v1 to their MIME type.
-// New formats (scanned PDF via OCR, HTML, PPTX) plug in here later without
-// touching the rest of the gateway.
+// allowedExtensions maps the file extensions the gateway will accept at intake
+// to their MIME type. New formats (scanned PDF via OCR, PPTX) plug in here
+// later without touching the rest of the gateway.
+//
+// NOTE: .csv is accepted at intake now so the gateway doesn't need another
+// change later, but the Python worker's loader does not yet implement CSV
+// parsing (deferred to v2 -- see load_document in tasks.py). A CSV upload
+// will be accepted and queued here, then fail loudly and specifically in the
+// worker with a clear "not yet implemented" error, rather than being silently
+// mishandled as prose text.
 var allowedExtensions = map[string]string{
 	".pdf":  "application/pdf",
 	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".html": "text/html",
+	".htm":  "text/html",
+	".csv":  "text/csv",
 }
 
 func loadConfig() config {
+	rawUploadDir := getenv("UPLOAD_DIR", "./data/uploads")
+	uploadDir, err := filepath.Abs(rawUploadDir)
+	if err != nil {
+		log.Fatalf("could not resolve upload dir %q to absolute path: %v", rawUploadDir, err)
+	}
+
 	return config{
 		port:      getenv("PORT", "8080"),
 		redisURL:  getenv("REDIS_URL", "redis://localhost:6379/0"),
-		uploadDir: getenv("UPLOAD_DIR", "./data/uploads"),
+		uploadDir: uploadDir,
 		queueName: getenv("QUEUE_NAME", "ingestion_jobs"),
 		maxBytes:  int64(getenvInt("MAX_UPLOAD_SIZE_MB", 50)) * 1024 * 1024,
 	}
@@ -155,7 +171,7 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	contentType, ok := allowedExtensions[ext]
 	if !ok {
-		http.Error(w, fmt.Sprintf("unsupported file type %q; allowed: .pdf, .docx", ext), http.StatusUnsupportedMediaType)
+		http.Error(w, fmt.Sprintf("unsupported file type %q; allowed: .pdf, .docx, .html, .htm, .csv", ext), http.StatusUnsupportedMediaType)
 		return
 	}
 	if header.Size <= 0 {

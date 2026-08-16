@@ -32,10 +32,12 @@
     },
     "content_type": {
       "type": "string",
-      "description": "MIME type the gateway assigned from the file extension.",
+      "description": "MIME type the gateway assigned from the file extension. Note: text/csv is accepted at intake for future use, but the v1 worker pipeline does not yet implement CSV loading (deferred to v2) -- see load_document in tasks.py.",
       "enum": [
         "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/html",
+        "text/csv"
       ]
     },
     "size_bytes": {

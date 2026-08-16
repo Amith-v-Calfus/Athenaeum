@@ -83,16 +83,81 @@ def is_duplicate(content_hash: str) -> bool:
 
 
 # --- OPEN DECISION: loading -------------------------------------------------
+def _load_pdf(storage_path: str) -> str:
+    """Extract text from a text-based PDF using PyMuPDF (fitz).
+
+    Assumes the PDF has an extractable text layer (not a scanned image). OCR
+    fallback for scanned PDFs is explicitly out of v1 scope (deferred to v2).
+    """
+    import pymupdf  # the `fitz` alias is deprecated as of recent PyMuPDF releases
+
+    doc = pymupdf.open(storage_path)
+    try:
+        pages = [page.get_text() for page in doc]
+    finally:
+        doc.close()
+    return "\n".join(pages)
+
+
+def _load_docx(storage_path: str) -> str:
+    """Extract text from a Word document using python-docx.
+
+    Reads paragraph text in document order. Tables inside the docx are not
+    specially handled in v1 -- their cell text is not extracted by this path.
+    """
+    import docx  # python-docx
+
+    document = docx.Document(storage_path)
+    paragraphs = [p.text for p in document.paragraphs]
+    return "\n".join(paragraphs)
+
+
+def _load_html(storage_path: str) -> str:
+    """Strip an HTML file down to its visible text using BeautifulSoup.
+
+    Drops script/style tags entirely (not visible content, would pollute
+    chunks) before extracting text.
+    """
+    from bs4 import BeautifulSoup
+
+    with open(storage_path, encoding="utf-8", errors="replace") as f:
+        soup = BeautifulSoup(f, "html.parser")
+
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+
+    return soup.get_text(separator="\n")
+
+
+# Dispatch table: content_type -> loader function. Adding a new format later
+# means writing one _load_x function and adding one line here -- nothing else
+# in the pipeline changes.
+_LOADERS = {
+    "application/pdf": _load_pdf,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": _load_docx,
+    "text/html": _load_html,
+}
+
+
 def load_document(storage_path: str, content_type: str) -> str:
     """Turn a raw file on the shared volume into plain text.
 
-    OPEN DECISION: which loader. PDF (text) and DOCX for v1, converging on a
-    single clean-text intermediate representation. Loader library not locked
-    (unstructured vs pymupdf/python-docx vs LangChain loaders).
+    Dispatches by content_type to a format-specific loader. v1 supports PDF
+    (text-based), DOCX, and HTML. CSV is accepted at the Go gateway's intake
+    for future use but intentionally not handled here yet -- see v2 scope.
+    Scanned/OCR PDFs are also deferred to v2.
     """
-    raise NotImplementedError(
-        "load_document: loader library not locked yet (PDF + DOCX -> clean text)."
-    )
+    if content_type == "text/csv":
+        raise NotImplementedError(
+            "load_document: CSV loading is deferred to v2 (tabular data needs "
+            "its own chunking strategy, not plain-text chunking)."
+        )
+
+    loader = _LOADERS.get(content_type)
+    if loader is None:
+        raise ValueError(f"load_document: unsupported content_type {content_type!r}")
+
+    return loader(storage_path)
 
 
 # --- OPEN DECISION: cleaning ------------------------------------------------
