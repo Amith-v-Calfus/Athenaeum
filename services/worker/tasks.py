@@ -26,8 +26,12 @@ Fill these in stage by stage as each decision is made.
 
 import hashlib
 import logging
+import re
+import html
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
+from collections import Counter
 
 from celery_app import app
 
@@ -83,8 +87,58 @@ def is_duplicate(content_hash: str) -> bool:
 
 
 # --- OPEN DECISION: loading -------------------------------------------------
+def _detect_boilerplate_lines(pages_text: list[str], threshold: float = 0.6) -> set[str]:
+    """Return lines that appear on at least `threshold` fraction of pages.
+
+    A line repeating across most pages (a company footer, a running header)
+    is almost certainly boilerplate, not real content. Needs at least 2 pages
+    to detect repetition at all.
+    """
+    if len(pages_text) < 2:
+        return set()
+    line_page_count = Counter()
+    for page_text in pages_text:
+        lines = set(l.strip() for l in page_text.split("\n") if l.strip())
+        for line in lines:
+            line_page_count[line] += 1
+    num_pages = len(pages_text)
+    return {line for line, count in line_page_count.items() if count / num_pages >= threshold}
+
+
+_PAGE_NUMBER_PATTERNS = [
+    re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.IGNORECASE),  # "Page 3", "Page 3 of 47"
+    re.compile(r"^\d{1,4}$"),                                    # a lone number on its own line
+    re.compile(r"^-\s*\d{1,4}\s*-$"),                            # "- 3 -"
+]
+
+
+def _looks_like_page_number(line: str) -> bool:
+    stripped = line.strip()
+    return any(p.match(stripped) for p in _PAGE_NUMBER_PATTERNS)
+
+
+def _strip_boilerplate_from_page(page_text: str, boilerplate_lines: set[str]) -> str:
+    kept = []
+    for line in page_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped in boilerplate_lines:
+            continue
+        if _looks_like_page_number(stripped):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def _load_pdf(storage_path: str) -> str:
-    """Extract text from a text-based PDF using PyMuPDF (fitz).
+    """Extract text from a text-based PDF using PyMuPDF, stripping repeated
+    headers/footers and page numbers.
+
+    Repetition is detected across pages (a line appearing on most pages is
+    almost certainly boilerplate), which is why extraction happens per-page
+    before being joined into one string -- this detection is impossible once
+    pages are flattened into a single blob.
 
     Assumes the PDF has an extractable text layer (not a scanned image). OCR
     fallback for scanned PDFs is explicitly out of v1 scope (deferred to v2).
@@ -93,10 +147,13 @@ def _load_pdf(storage_path: str) -> str:
 
     doc = pymupdf.open(storage_path)
     try:
-        pages = [page.get_text() for page in doc]
+        pages_text = [page.get_text() for page in doc]
     finally:
         doc.close()
-    return "\n".join(pages)
+
+    boilerplate = _detect_boilerplate_lines(pages_text)
+    cleaned_pages = [_strip_boilerplate_from_page(p, boilerplate) for p in pages_text]
+    return "\n".join(cleaned_pages)
 
 
 def _load_docx(storage_path: str) -> str:
@@ -161,18 +218,38 @@ def load_document(storage_path: str, content_type: str) -> str:
 
 
 # --- OPEN DECISION: cleaning ------------------------------------------------
+_ENCODING_REPLACEMENTS = {
+    "\u2018": "'", "\u2019": "'",   # smart single quotes -> straight quote
+    "\u201c": '"', "\u201d": '"',  # smart double quotes -> straight quote
+    "\u2013": "-", "\u2014": "-",  # en-dash, em-dash -> hyphen
+    "\u00a0": " ",                  # non-breaking space -> regular space
+    "\u2026": "...",                 # ellipsis character -> three dots
+}
+
+
 def clean_text(raw_text: str) -> str:
-    """Normalise and strip boilerplate before chunking.
+    """Universal mechanical cleaning applied after any loader (PDF/DOCX/HTML).
 
-    OPEN DECISION: boilerplate removal (repeated headers/footers, page numbers),
-    whitespace normalisation, encoding fixes (smart quotes, em-dashes, nbsp).
-    Approach not locked.
+    Format-specific cleaning (PDF header/footer stripping) already happened
+    inside the loader, where page structure still existed. This step is
+    safe and useful regardless of source format:
+      - unescape leftover HTML entities (e.g. &nbsp; that survived a loader)
+      - normalise smart quotes/dashes/nbsp/ellipsis to plain ASCII equivalents
+      - normalise whitespace (collapse runs of spaces/tabs, collapse 3+ blank
+        lines to one, strip trailing spaces per line)
     """
-    raise NotImplementedError(
-        "clean_text: pre-processing approach not locked (strip boilerplate, "
-        "normalise whitespace/encoding)."
-    )
+    text = html.unescape(raw_text)
 
+    for bad, good in _ENCODING_REPLACEMENTS.items():
+        text = text.replace(bad, good)
+    text = unicodedata.normalize("NFKC", text)
+
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    lines = [line.strip() for line in text.split("\n")]
+    text = "\n".join(lines)
+
+    return text.strip()
 
 # --- OPEN DECISION: chunking (mission M6S1) --------------------------------
 def chunk_text(cleaned_text: str) -> list[str]:

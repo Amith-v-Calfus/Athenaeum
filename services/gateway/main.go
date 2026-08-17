@@ -21,6 +21,7 @@ import (
 // with that schema file; the schema is the source of truth.
 type IngestionJob struct {
 	JobID            string `json:"job_id"`
+	UserId           string `json:"user_id"`
 	OriginalFilename string `json:"original_filename"`
 	StoragePath      string `json:"storage_path"`
 	ContentType      string `json:"content_type"`
@@ -167,6 +168,12 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	userID := strings.TrimSpace(r.FormValue("user_id"))
+	if userID == "" {
+		http.Error(w, "missing 'user_id' field in multipart form", http.StatusBadRequest)
+		return
+	}
+
 	// --- Validation (cheap, structural, no content parsing) ---
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	contentType, ok := allowedExtensions[ext]
@@ -206,6 +213,7 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// --- Build the job and push it onto the queue ---
 	job := IngestionJob{
 		JobID:            jobID,
+		UserId:           userID,
 		OriginalFilename: header.Filename,
 		StoragePath:      storagePath,
 		ContentType:      contentType,
