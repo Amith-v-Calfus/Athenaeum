@@ -12,7 +12,11 @@ So the flow is:
 
 import os
 
+from dotenv import load_dotenv
 from celery import Celery
+
+
+load_dotenv()
 
 # Celery uses Redis both as the broker (task queue) and the result backend.
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

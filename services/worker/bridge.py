@@ -17,11 +17,12 @@ import json
 import logging
 import os
 import redis
-
+from dotenv import load_dotenv
 from tasks import ingest_document
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [bridge] %(message)s")
 log=logging.getLogger(__name__)
+load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "ingestion_jobs")
