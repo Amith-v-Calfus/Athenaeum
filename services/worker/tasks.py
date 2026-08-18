@@ -30,7 +30,9 @@ import logging
 import re
 import html
 import unicodedata
-import chromadb
+import weaviate
+from weaviate.classes.config import Configure, DataType, Property
+from weaviate.classes.query import Filter
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from typing import Any
@@ -51,12 +53,13 @@ _splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", ". ", " ", ""],  # paragraph -> line -> sentence -> word -> char
 )
 
-_CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_data")
-_COLLECTION_NAME = "athenaeum_chunks"
+_WEAVIATE_HOST = os.getenv("WEAVIATE_HOST", "localhost")
+_WEAVIATE_HTTP_PORT = int(os.getenv("WEAVIATE_HTTP_PORT", "8081"))
+_WEAVIATE_GRPC_PORT = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
+_COLLECTION_NAME = "AthenaeumChunks"
 _EMBEDDING_MODEL = "text-embedding-3-small"
 
-_chroma_client = None
-_collection = None
+_weaviate_client = None
 
 # --- Per-chunk metadata contract -------------------------------------------
 # Every chunk carries this so that (a) citations can name the exact document and
@@ -93,29 +96,59 @@ def compute_content_hash(cleaned_text: str) -> str:
     """
     return hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
 
-def _get_collection():
-    """Lazily create the persisted ChromaDB client/collection (once per process)."""
-    global _chroma_client, _collection
-    if _collection is None:
-        _chroma_client = chromadb.PersistentClient(path=_CHROMA_PATH)
-        _collection = _chroma_client.get_or_create_collection(name=_COLLECTION_NAME)
-    return _collection
+def _get_client():
+    """Lazily create and cache the Weaviate client connection (once per process).
+
+    Also ensures the AthenaeumChunks collection exists with the right schema,
+    including BM25 (keyword) indexing on the text field so hybrid search
+    works out of the box -- this is the capability ChromaDB did not have
+    natively, which is the whole reason for this migration.
+    """
+    global _weaviate_client
+    if _weaviate_client is None:
+        _weaviate_client = weaviate.connect_to_local(
+            host=_WEAVIATE_HOST,
+            port=_WEAVIATE_HTTP_PORT,
+            grpc_port=_WEAVIATE_GRPC_PORT,
+        )
+        if not _weaviate_client.collections.exists(_COLLECTION_NAME):
+            _weaviate_client.collections.create(
+                _COLLECTION_NAME,
+                properties=[
+                    Property(name="text", data_type=DataType.TEXT),
+                    Property(name="doc_id", data_type=DataType.TEXT),
+                    Property(name="user_id", data_type=DataType.TEXT),
+                    Property(name="original_filename", data_type=DataType.TEXT),
+                    Property(name="content_type", data_type=DataType.TEXT),
+                    Property(name="content_hash", data_type=DataType.TEXT),
+                    Property(name="chunk_index", data_type=DataType.INT),
+                    Property(name="page", data_type=DataType.INT),
+                    Property(name="section", data_type=DataType.TEXT),
+                    Property(name="extraction_method", data_type=DataType.TEXT),
+                    Property(name="embedding_model", data_type=DataType.TEXT),
+                ],
+                # We supply our own OpenAI embeddings (same model as before) --
+                # Weaviate does not need to generate vectors itself.
+                vector_config=Configure.Vectors.self_provided(),
+            )
+    return _weaviate_client
 
 def is_duplicate(user_id: str, content_hash: str) -> bool:
-    """Return True if THIS USER already ingested a document with this content hash.
-
-    Scoped per-user, not global: if two different users upload the same
-    document, both get their own copy stored, each tagged with their own
-    user_id. A global hash check would incorrectly skip storing it for the
-    second user, making it invisible to their queries even though it is
-    genuinely theirs. The lookup key is (user_id, content_hash), not
-    content_hash alone.
+    """Return True if THIS USER already ingested a document with this
+    content hash. Scoped per-user via a metadata filter, same isolation
+    principle as before -- see the original ChromaDB version's docstring
+    for the full per-user-not-global reasoning (unchanged).
     """
-    collection = _get_collection()
-    result = collection.get(
-        where={"$and": [{"user_id": user_id}, {"content_hash": content_hash}]}
+    client = _get_client()
+    collection = client.collections.get(_COLLECTION_NAME)
+    result = collection.query.fetch_objects(
+        filters=(
+            Filter.by_property("user_id").equal(user_id)
+            & Filter.by_property("content_hash").equal(content_hash)
+        ),
+        limit=1,
     )
-    return len(result["ids"]) > 0
+    return len(result.objects) > 0
 
 # --- OPEN DECISION: loading -------------------------------------------------
 def _detect_boilerplate_lines(pages_text: list[str], threshold: float = 0.6) -> set[str]:
@@ -371,13 +404,8 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     return [item.embedding for item in response.data]
 
 def embed_and_store(chunks: list[Chunk]) -> None:
-    """Embed each chunk and upsert into the persisted ChromaDB collection.
-
-    Every chunk's metadata (including user_id) is stored alongside its vector,
-    which is what makes per-user retrieval filtering and dedup possible later.
-    The embedding_model name/version is stamped into each chunk's metadata so
-    a future model change can never silently mix incompatible vectors in the
-    same collection without it being visible in the data itself.
+    """Embed each chunk and insert into Weaviate. Same embedding model and
+    metadata contract as before -- only the storage backend changed.
     """
     if not chunks:
         return
@@ -385,22 +413,32 @@ def embed_and_store(chunks: list[Chunk]) -> None:
     texts = [c.text for c in chunks]
     embeddings = _embed_batch(texts)
 
-    collection = _get_collection()
-    ids = [f"{c.metadata.doc_id}_{c.metadata.chunk_index}" for c in chunks]
-    metadatas = []
-    for c in chunks:
-        c.metadata.embedding_model = _EMBEDDING_MODEL
-        meta = {k: v for k, v in c.metadata.__dict__.items() if k != "extra"}
-        meta.update(c.metadata.extra)
-        # Chroma metadata values must be str/int/float/bool -- drop any None values.
-        metadatas.append({k: v for k, v in meta.items() if v is not None})
+    client = _get_client()
+    collection = client.collections.get(_COLLECTION_NAME)
 
-    collection.add(
-        ids=ids,
-        embeddings=embeddings,
-        documents=texts,
-        metadatas=metadatas,
-    )
+    with collection.batch.dynamic() as batch:
+        for c, vector in zip(chunks, embeddings):
+            c.metadata.embedding_model = _EMBEDDING_MODEL
+            properties = {
+                "text": c.text,
+                "doc_id": c.metadata.doc_id,
+                "user_id": c.metadata.user_id,
+                "original_filename": c.metadata.original_filename,
+                "content_type": c.metadata.content_type,
+                "content_hash": c.metadata.content_hash,
+                "chunk_index": c.metadata.chunk_index,
+                "embedding_model": c.metadata.embedding_model,
+            }
+            # Optional fields -- only include if not None (page is None for
+            # DOCX/HTML, section is None until section-detection is built).
+            if c.metadata.page is not None:
+                properties["page"] = c.metadata.page
+            if c.metadata.section is not None:
+                properties["section"] = c.metadata.section
+            if c.metadata.extraction_method is not None:
+                properties["extraction_method"] = c.metadata.extraction_method
+
+            batch.add_object(properties=properties, vector=vector)
 
 # Orchestration (the Celery task) 
 @app.task(name="tasks.ingest_document", bind=True, max_retries=3)

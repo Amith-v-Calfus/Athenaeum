@@ -8,5 +8,6 @@ pandas
 langchain-text-splitters
 openai
 python-dotenv
+weaviate-client
 # embedding library (OPenAI text-embedding-3)
 # pytesseract + tesseract binary
