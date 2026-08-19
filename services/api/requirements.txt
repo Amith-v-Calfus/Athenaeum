@@ -2,6 +2,7 @@ fastapi
 uvicorn
 langchain
 chromadb
-opennai
+openai
+python-dotenv
 sentence-transformers
 weaviate-client

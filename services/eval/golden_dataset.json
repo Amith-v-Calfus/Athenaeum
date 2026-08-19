@@ -1,0 +1,120 @@
+[
+  {
+    "question": "What are the working hours for interns?",
+    "expected_answer_contains": ["9:30", "6:30"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "How do interns apply for leave?",
+    "expected_answer_contains": ["Greythr"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "What happens if an intern runs out of leave balance?",
+    "expected_answer_contains": ["Loss of Pay"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Can interns work from home?",
+    "expected_answer_contains": ["approval"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Where can an intern report an ethics concern or misconduct confidentially?",
+    "expected_answer_contains": ["ethics@calfus.com"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Can interns install unapproved software on their work laptop?",
+    "expected_answer_contains": ["approved"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Who should an intern contact if they cannot access a tool or system?",
+    "expected_answer_contains": ["IT@calfus.com"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "When do interns get paid their stipend?",
+    "expected_answer_contains": ["last working day"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Where can interns view their payslip?",
+    "expected_answer_contains": ["Greythr"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "What is the notice period for an intern who wants to leave early?",
+    "expected_answer_contains": ["15"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "What do interns need to complete to receive an experience certificate?",
+    "expected_answer_contains": ["No Dues"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Is there a non-compete clause for interns after their internship ends?",
+    "expected_answer_contains": ["12 months"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "How many CSR hours are interns encouraged to contribute each year?",
+    "expected_answer_contains": ["10 hours"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "How do interns log their daily attendance?",
+    "expected_answer_contains": ["biometric"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "How many hours of weekend work are needed to earn a full-day comp off?",
+    "expected_answer_contains": ["7"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Is the employee referral bonus policy available to interns?",
+    "expected_answer_contains": ["permanent employees"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Does Calfus provide insurance coverage to interns?",
+    "expected_answer_contains": ["insurance"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "What should an intern do if they fall sick for an extended period?",
+    "expected_answer_contains": ["Loss of Pay"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Who should interns contact for further questions not covered in the FAQ?",
+    "expected_answer_contains": ["Hr-India@calfus.com"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "Is there a policy on drugs and alcohol at Calfus?",
+    "expected_answer_contains": ["alcohol"],
+    "expected_source_file": "Calfus_Intern_FAQ.pdf"
+  },
+  {
+    "question": "What is the capital of France?",
+    "expected_answer_contains": ["don't have", "do not have", "does not contain", "no information"],
+    "match": "any",
+    "expected_source_file": null
+  },
+  {
+    "question": "Write a Python function to compute the Fibonacci sequence.",
+    "expected_answer_contains": ["don't have", "do not have", "does not contain", "no information"],
+    "match": "any",
+    "expected_source_file": null
+  },
+  {
+    "question": "What is the current stock price of Apple?",
+    "expected_answer_contains": ["don't have", "do not have", "does not contain", "no information"],
+    "match": "any",
+    "expected_source_file": null
+  }
+]

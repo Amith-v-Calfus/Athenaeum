@@ -110,6 +110,9 @@ def _get_reranker():
     return _reranker_model
 
 def _rerank(question: str, results: list[dict], top_k: int = _FINAL_TOP_K) -> list[dict]:
+    """The cross-encoder takes the query and a single chunk together, as one combined input, and the model directly outputs a single relevance score for that specific pair. 
+    Because it sees both texts simultaneously, it can pick up on nuanced relationships bi-encoders miss — but it's much more computationally expensive, since it can't be precomputed or batched the same way. 
+    You cannot run a cross-encoder over your entire corpus for every query; it would be far too slow."""
     model = _get_reranker()
     pairs = [[question, r["text"]] for r in results]
     scores = model.predict(pairs)

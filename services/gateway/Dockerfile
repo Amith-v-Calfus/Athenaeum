@@ -1,0 +1,20 @@
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY main.go ./
+RUN CGO_ENABLED=0 go build -o /gateway .
+
+FROM alpine:3.20
+
+RUN adduser -D -u 10001 gateway
+WORKDIR /app
+COPY --from=builder /gateway /app/gateway
+
+USER gateway
+EXPOSE 8080
+
+ENTRYPOINT ["/app/gateway"]
