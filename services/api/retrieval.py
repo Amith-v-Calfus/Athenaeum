@@ -176,6 +176,23 @@ def build_prompt(question: str, context_chunks: list[dict]) -> tuple[str, str]:
     return system_prompt, user_prompt
 
 
+_REFUSAL_PHRASES = [
+    "don't have", "do not have", "does not contain", "no information",
+    "doesn't contain", "not contain enough information",
+]
+
+
+def _is_refusal(answer: str) -> bool:
+    """Heuristic check: does the answer look like a refusal, based on
+    the same phrases already used in services/eval/golden_dataset.json's
+    refusal test cases. Not perfectly precise (a real answer could
+    coincidentally contain one of these phrases), but good enough for
+    deciding whether to suppress a misleading sources list.
+    """
+    answer_lower = answer.lower()
+    return any(phrase in answer_lower for phrase in _REFUSAL_PHRASES)
+
+
 def generate_answer(question: str, context_chunks: list[dict]) -> str:
     """Call the generation model with the grounded, citation-instructed prompt."""
     system_prompt, user_prompt = build_prompt(question, context_chunks)
@@ -205,6 +222,9 @@ def answer_question(question: str, user_id: str) -> dict:
     reranked = _rerank(question, hybrid_results, top_k=_FINAL_TOP_K)
     context = _assemble_context(reranked)
     answer = generate_answer(question, context)
+
+    if _is_refusal(answer):
+        return {"answer": answer, "sources": []}
 
     sources = [
         {"filename": c["original_filename"], "page": c.get("page")}
