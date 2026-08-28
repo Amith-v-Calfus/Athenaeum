@@ -1,10 +1,3 @@
-"""FastAPI service exposing the retrieval pipeline over HTTP.
-
-Wraps answer_question() from retrieval.py behind /query, and loads the
-reranker model once at startup (instead of once per request) to fix the
-~22s cold-start latency the standalone script pays on every invocation.
-"""
-
 import os
 from contextlib import asynccontextmanager
 

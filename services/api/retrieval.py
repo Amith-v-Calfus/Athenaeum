@@ -1,34 +1,3 @@
-"""Retrieval pipeline (query-time, synchronous).
-
-This is a separate module/service from tasks.py deliberately: ingestion
-(tasks.py) is an async background job triggered by file upload; retrieval is
-a synchronous request triggered by a live user question. Different trigger,
-different lifecycle -- they belong in different files, and eventually
-different services (this lives behind the FastAPI backend, tasks.py behind
-Celery).
-
-Pipeline, matching the reference architecture:
-
-    User Query -> Query Embedding -> Hybrid Retrieval (dense + BM25, Weaviate
-    native) -> Rerank (local cross-encoder) -> Context Assembly (dedup, sort,
-    trim) -> LLM Generation (with citations + refusal instructions)
-
-DESIGN NOTE ON WHAT IS TESTED
------------------------------
-Tested for real, standalone, without needing a live server:
-    - build_prompt          (prompt construction logic)
-    - _assemble_context     (dedup/sort/trim logic)
-
-NOT yet tested end-to-end against a live Weaviate server or the real
-cross-encoder model (sandbox constraints) -- verify these on first real run:
-    - retrieve() -- the hybrid() query call itself
-    - _rerank()  -- needs sentence-transformers + model download
-Both are built against the confirmed current weaviate-client v4 API surface
-(hybrid()'s real parameter names were inspected directly, not guessed), but
-"compiles against the right API" is not the same as "proven to run" -- run
-the smoke test at the bottom of this file on first use.
-"""
-
 import os
 
 from openai import OpenAI
@@ -38,12 +7,10 @@ load_dotenv()
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _GENERATION_MODEL = "gpt-4o-mini"
 _COLLECTION_NAME = "AthenaeumChunks"
-_HYBRID_ALPHA = 0.5  # 0.0 = pure BM25, 1.0 = pure dense. 0.5 = even blend, a
-                      # reasonable starting point before tuning against real
-                      # eval data.
-_RERANK_TOP_K = 10    # how many hybrid results to pull before reranking
-_FINAL_TOP_K = 5       # how many results survive reranking, into the prompt
-_MAX_CONTEXT_CHARS = 6000  # trim budget for assembled context
+_HYBRID_ALPHA = 0.5
+_RERANK_TOP_K = 10
+_FINAL_TOP_K = 5
+_MAX_CONTEXT_CHARS = 6000
 _reranker_model=None
 
 def _embed_query(question: str) -> list[float]:
@@ -234,10 +201,6 @@ def answer_question(question: str, user_id: str) -> dict:
 
 
 if __name__ == "__main__":
-    # Smoke test -- run this file directly once your Weaviate server and
-    # ingested documents are up, to confirm the whole chain works end to end
-    # before wiring it into FastAPI:
-    #     python3 retrieval.py
     import sys
 
     user_id = sys.argv[1] if len(sys.argv) > 1 else "amith"

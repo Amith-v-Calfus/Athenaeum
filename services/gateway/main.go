@@ -97,8 +97,8 @@ func newUUIDv4() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
@@ -154,7 +154,6 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cap the request body so an oversized upload cannot exhaust memory/disk.
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.maxBytes)
 	if err := r.ParseMultipartForm(s.cfg.maxBytes); err != nil {
 		http.Error(w, "file too large or malformed multipart form", http.StatusRequestEntityTooLarge)
@@ -174,7 +173,6 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Validation (cheap, structural, no content parsing) ---
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	contentType, ok := allowedExtensions[ext]
 	if !ok {
@@ -186,7 +184,6 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Save to the shared volume under a generated job id ---
 	jobID, err := newUUIDv4()
 	if err != nil {
 		http.Error(w, "could not generate job id", http.StatusInternalServerError)
@@ -204,13 +201,11 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		err = closeErr
 	}
 	if err != nil {
-		// Best-effort cleanup so we don't leave a half-written file behind.
 		_ = os.Remove(storagePath)
 		http.Error(w, "could not write file", http.StatusInternalServerError)
 		return
 	}
 
-	// --- Build the job and push it onto the queue ---
 	job := IngestionJob{
 		JobID:            jobID,
 		UserId:           userID,
@@ -232,7 +227,6 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if err := s.rdb.RPush(ctx, s.cfg.queueName, payload).Err(); err != nil {
-		// If we cannot enqueue, remove the saved file so nothing is orphaned.
 		_ = os.Remove(storagePath)
 		http.Error(w, "could not enqueue job", http.StatusServiceUnavailable)
 		return

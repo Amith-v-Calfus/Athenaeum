@@ -1,29 +1,3 @@
-"""Ingestion pipeline (Celery task).
-
-This is the Python worker's job description. It runs the stages we designed in
-Phase 1:
-
-    load -> clean -> hash/dedup -> chunk -> enrich metadata -> embed & store
-
-DESIGN NOTE ON WHAT IS AND ISN'T IMPLEMENTED
---------------------------------------------
-The orchestration and the stages whose design we have already locked are fully
-implemented:
-    - compute_content_hash  (SHA-256 on CLEANED text -- decided)
-    - the dedup gate
-    - build_chunk_metadata  (the metadata contract per chunk)
-
-The stages that still depend on an open board decision are deliberately left as
-stubs that raise NotImplementedError, so nothing is silently hardcoded:
-    - load_document   -> loader library choice is not locked
-    - clean_text      -> boilerplate/normalisation approach not locked
-    - chunk_text      -> chunk size + overlap + strategy = M6S1, must be chosen
-                         and defended to the mentor; NOT hardcoding it here
-    - embed_and_store -> embedding model + ChromaDB collection details not locked
-
-Fill these in stage by stage as each decision is made.
-"""
-
 import os
 import hashlib
 import logging
@@ -44,13 +18,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 log = logging.getLogger(__name__)
 load_dotenv()
 
-_CHUNK_SIZE_CHARS = 1400   # ~350 tokens
-_CHUNK_OVERLAP_CHARS = 200  # ~50 tokens, ~15% of chunk size
+_CHUNK_SIZE_CHARS = 1400
+_CHUNK_OVERLAP_CHARS = 200
 
 _splitter = RecursiveCharacterTextSplitter(
     chunk_size=_CHUNK_SIZE_CHARS,
     chunk_overlap=_CHUNK_OVERLAP_CHARS,
-    separators=["\n\n", "\n", ". ", " ", ""],  # paragraph -> line -> sentence -> word -> char
+    separators=["\n\n", "\n", ". ", " ", ""],
 )
 
 _WEAVIATE_HOST = os.getenv("WEAVIATE_HOST", "localhost")
@@ -61,22 +35,18 @@ _EMBEDDING_MODEL = "text-embedding-3-small"
 
 _weaviate_client = None
 
-# --- Per-chunk metadata contract -------------------------------------------
-# Every chunk carries this so that (a) citations can name the exact document and
-# section (mission M6S4) and (b) retrieval can filter later. The embedding model
-# name/version is stored so we never silently mix vectors from different models.
 @dataclass
 class ChunkMetadata:
-    doc_id: str            # the job_id: identifies the source document
+    doc_id: str
     user_id:str
     original_filename: str
     content_type: str
-    content_hash: str      # SHA-256 of the cleaned document text
-    chunk_index: int       # position of this chunk within the document
-    section: str | None = None      # section/heading, if the loader recovered it
-    page: int | None = None         # page number, if applicable
-    extraction_method: str | None = None  # e.g. "pdf-text", "ocr" -- feeds confidence later
-    embedding_model: str | None = None    # model name+version used for this vector
+    content_hash: str
+    chunk_index: int
+    section: str | None = None
+    page: int | None = None
+    extraction_method: str | None = None
+    embedding_model: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -86,7 +56,6 @@ class Chunk:
     metadata: ChunkMetadata
 
 
-# --- DECIDED: content hashing ----------------------------------------------
 def compute_content_hash(cleaned_text: str) -> str:
     """SHA-256 over the CLEANED text.
 
@@ -127,8 +96,6 @@ def _get_client():
                     Property(name="extraction_method", data_type=DataType.TEXT),
                     Property(name="embedding_model", data_type=DataType.TEXT),
                 ],
-                # We supply our own OpenAI embeddings (same model as before) --
-                # Weaviate does not need to generate vectors itself.
                 vector_config=Configure.Vectors.self_provided(),
             )
     return _weaviate_client
@@ -150,7 +117,6 @@ def is_duplicate(user_id: str, content_hash: str) -> bool:
     )
     return len(result.objects) > 0
 
-# --- OPEN DECISION: loading -------------------------------------------------
 def _detect_boilerplate_lines(pages_text: list[str], threshold: float = 0.6) -> set[str]:
     """Return lines that appear on at least `threshold` fraction of pages.
 
@@ -170,9 +136,9 @@ def _detect_boilerplate_lines(pages_text: list[str], threshold: float = 0.6) -> 
 
 
 _PAGE_NUMBER_PATTERNS = [
-    re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.IGNORECASE),  # "Page 3", "Page 3 of 47"
-    re.compile(r"^\d{1,4}$"),                                    # a lone number on its own line
-    re.compile(r"^-\s*\d{1,4}\s*-$"),                            # "- 3 -"
+    re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.IGNORECASE),
+    re.compile(r"^\d{1,4}$"),
+    re.compile(r"^-\s*\d{1,4}\s*-$"),
 ]
 
 
@@ -247,9 +213,6 @@ def _load_html(storage_path: str) -> list[tuple[int | None, str]]:
 
     return [(None, soup.get_text(separator="\n"))]
 
-# Dispatch table: content_type -> loader function. Adding a new format later
-# means writing one _load_x function and adding one line here -- nothing else
-# in the pipeline changes.
 _LOADERS = {
     "application/pdf": _load_pdf,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": _load_docx,
@@ -275,13 +238,12 @@ def load_document(storage_path: str, content_type: str) -> list[tuple[int | None
 
     return loader(storage_path)
 
-# --- OPEN DECISION: cleaning ------------------------------------------------
 _ENCODING_REPLACEMENTS = {
-    "\u2018": "'", "\u2019": "'",   # smart single quotes -> straight quote
-    "\u201c": '"', "\u201d": '"',  # smart double quotes -> straight quote
-    "\u2013": "-", "\u2014": "-",  # en-dash, em-dash -> hyphen
-    "\u00a0": " ",                  # non-breaking space -> regular space
-    "\u2026": "...",                 # ellipsis character -> three dots
+    "\u2018": "'", "\u2019": "'",
+    "\u201c": '"', "\u201d": '"',
+    "\u2013": "-", "\u2014": "-",
+    "\u00a0": " ",
+    "\u2026": "...",
 }
 
 
@@ -359,7 +321,7 @@ def chunk_text(segments: list[tuple[int | None, str]]) -> list[tuple[str, int | 
         start_search = max(0, search_from - _CHUNK_OVERLAP_CHARS - 50)
         idx = full_text.find(chunk, start_search)
         if idx == -1:
-            idx = full_text.find(chunk)  # fallback: search from the beginning
+            idx = full_text.find(chunk)
         page = _page_for_offset(ranges, idx if idx != -1 else search_from)
         result.append((chunk, page))
         if idx != -1:
@@ -399,7 +361,7 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     """
     from openai import OpenAI
 
-    client = OpenAI()  # reads OPENAI_API_KEY from the environment
+    client = OpenAI()
     response = client.embeddings.create(model=_EMBEDDING_MODEL, input=texts)
     return [item.embedding for item in response.data]
 
@@ -429,8 +391,6 @@ def embed_and_store(chunks: list[Chunk]) -> None:
                 "chunk_index": c.metadata.chunk_index,
                 "embedding_model": c.metadata.embedding_model,
             }
-            # Optional fields -- only include if not None (page is None for
-            # DOCX/HTML, section is None until section-detection is built).
             if c.metadata.page is not None:
                 properties["page"] = c.metadata.page
             if c.metadata.section is not None:
@@ -440,7 +400,6 @@ def embed_and_store(chunks: list[Chunk]) -> None:
 
             batch.add_object(properties=properties, vector=vector)
 
-# Orchestration (the Celery task) 
 @app.task(name="tasks.ingest_document", bind=True, max_retries=3)
 def ingest_document(self, job: dict) -> dict:
     """Run the full ingestion pipeline for one document.
@@ -453,8 +412,6 @@ def ingest_document(self, job: dict) -> dict:
     segments = load_document(job["storage_path"], job["content_type"])
     cleaned_segments = clean_document(segments)
 
-    # Hash over the full joined cleaned text -- dedup behavior is unchanged,
-    # it just now assembles the text from segments instead of one flat string.
     full_cleaned_text = "\n".join(text for _, text in cleaned_segments)
     content_hash = compute_content_hash(full_cleaned_text)
 

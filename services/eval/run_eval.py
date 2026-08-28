@@ -1,17 +1,3 @@
-"""Evaluation harness for the retrieval pipeline.
-
-LIMITATION: this is a plain substring/source-match check, not a semantic
-grader (no DeepEval/RAGAS). It tells you whether the answer contains the
-expected facts and cites the expected file -- it does not judge fluency,
-completeness, or whether extra/wrong claims were added. Good enough to
-catch regressions quickly; not a substitute for a mentor's live read.
-
-run_eval only works when user_id="eval_user"
-
-Run against real, already-ingested data:
-    python3 run_eval.py
-"""
-
 import json
 import os
 import sys

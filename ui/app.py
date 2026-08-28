@@ -1,13 +1,3 @@
-"""Streamlit UI for Athenaeum: upload a document, then ask questions about it.
-
-Talks to two backends directly:
-    - Go gateway  (http://localhost:8080) for /upload
-    - FastAPI     (http://localhost:8000) for /query
-
-user_id is a plain text field, not a login -- real auth is deliberately out
-of scope for v1.
-"""
-
 import requests
 import streamlit as st
 
